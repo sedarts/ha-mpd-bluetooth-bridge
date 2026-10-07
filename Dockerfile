@@ -25,6 +25,7 @@ RUN apk add --no-cache \
         # au serveur audio partagé du Supervisor (celui qui voit le sink
         # Bluetooth de l'enceinte).
         bluez \
+        mosquitto-clients \
         # Fournit "bluetoothctl" (le paquet "bluez-deprecated" ne contient
         # QUE les anciens outils type hcitool/hciconfig, pas bluetoothctl —
         # erreur détectée après un premier essai raté) : utilisé par notre

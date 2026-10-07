@@ -14,7 +14,7 @@ name: "Bluetooth Audio Bridge"
 # Ancien nom : "Bluetooth Speaker MPD Bridge" (ancien nom encore avant :
 # "MPD JBL Bridge").
 
-version: "2.5.1"
+version: "2.6.0"
 # Version de l'add-on. À incrémenter à chaque modification si on veut
 # que le Supervisor propose une "mise à jour" plus tard.
 # Bump en 2.0.0 : changement de nom/slug (rupture de compatibilité pour
@@ -183,6 +183,11 @@ options:
   default_volume: 70
   renderer_volume: 100
   extra_speakers: []
+  battery_mqtt_enabled: false
+  battery_mqtt_host: ""
+  battery_mqtt_port: 1883
+  battery_mqtt_username: ""
+  battery_mqtt_password: ""
   # bluetooth_mac vide par défaut : depuis 2.4.0, c'est le point de départ
   # normal d'une première installation (mode configuration, voir schema
   # ci-dessous). L'enceinte est ensuite choisie depuis la page
@@ -199,6 +204,11 @@ options:
   # enceinte, exactement comme avant.
 
 schema:
+  battery_mqtt_enabled: "bool?"
+  battery_mqtt_host: "str?"
+  battery_mqtt_port: "port?"
+  battery_mqtt_username: "str?"
+  battery_mqtt_password: "password?"
   bluetooth_mac: "match(^(([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})?$)?"
   # Valide le format d'une adresse MAC Bluetooth (ex: AA:BB:CC:DD:EE:FF) et
   # affiche une erreur claire dans l'UI si l'utilisateur se trompe de format,

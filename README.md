@@ -528,3 +528,22 @@ If this add-on has been useful to you, you can support its development:
 
 [add-repo-shield]: https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg
 [add-repo-badge]: https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fdcybeldesign%2Fha-mpd-bluetooth-bridge
+
+
+### Optional Bluetooth battery sensor (2.6.0 preview)
+
+Set `battery_mqtt_enabled: true`, `battery_mqtt_host` (broker hostname/IP),
+`battery_mqtt_port` (default 1883), and optionally `battery_mqtt_username` /
+`battery_mqtt_password`. MQTT integration and a reachable broker must already
+be configured in Home Assistant. The feature is disabled by default.
+
+A Home Assistant MQTT Discovery battery sensor is created per configured speaker,
+using its MAC address for a stable unique ID. A connected speaker must expose
+`Battery Percentage` in `bluetoothctl info`; otherwise the sensor is unavailable.
+Values are sampled at `reconnect_interval`, expire after 120 seconds, and are
+marked unavailable on disconnect. A disconnected speaker may not report battery
+status even while charging; do not rely on it for unattended charge control
+without first verifying behavior on the specific hardware.
+
+**Development note:** MQTT publishing and BlueZ behavior require integration
+testing on a real Home Assistant host before release/deployment.

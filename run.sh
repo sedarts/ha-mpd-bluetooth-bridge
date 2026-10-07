@@ -464,6 +464,57 @@ monitor_speaker() {
         ensure_audio_sink "${sink}" "${card}"
     done
 }
+# Optional, isolated MQTT battery monitor. No Bluetooth connection changes.
+# Each device gets its own discovery/state/availability topics.
+if [ "$(bashio::config 'battery_mqtt_enabled' 2>/dev/null || echo false)" = "true" ]; then
+    MQTT_HOST=$(bashio::config 'battery_mqtt_host')
+    MQTT_PORT=$(bashio::config 'battery_mqtt_port')
+    MQTT_USER=$(bashio::config 'battery_mqtt_username')
+    MQTT_PASS=$(bashio::config 'battery_mqtt_password')
+    if [ -n "${MQTT_HOST}" ] && [ "${MQTT_HOST}" != "null" ]; then
+        mqtt_publish() {
+            local topic="$1" payload="$2" retain="$3"
+            local args=(-h "${MQTT_HOST}" -p "${MQTT_PORT}" -t "${topic}" -m "${payload}" -q 1)
+            if [ "${retain}" = yes ]; then args+=(-r); fi
+            if [ -n "${MQTT_USER}" ] && [ "${MQTT_USER}" != null ]; then args+=(-u "${MQTT_USER}"); fi
+            if [ -n "${MQTT_PASS}" ] && [ "${MQTT_PASS}" != null ]; then args+=(-P "${MQTT_PASS}"); fi
+            timeout 8 mosquitto_pub "${args[@]}" >/dev/null 2>&1 || true
+        }
+        monitor_battery() {
+            local mac="$1" id="${1//:/}" info value prefix discovery
+            id="${id,,}"
+            prefix="bluetooth_audio_bridge/${id}"
+            discovery="homeassistant/sensor/bluetooth_audio_bridge_${id}_battery/config"
+            # Discovery is retained, state and availability are not; expire_after
+            # prevents a stale value being treated as fresh after a crash.
+            local config
+            config=$(printf '{"name":"Battery","unique_id":"bluetooth_audio_bridge_%s_battery","state_topic":"%s/state","availability_topic":"%s/availability","device_class":"battery","state_class":"measurement","unit_of_measurement":"%%","expire_after":120,"device":{"identifiers":["bluetooth_audio_bridge_%s"],"name":"Bluetooth Speaker %s","manufacturer":"Bluetooth Audio Bridge"}}' "${id}" "${prefix}" "${prefix}" "${id}" "${mac}")
+            while true; do
+                mqtt_publish "${discovery}" "${config}" yes
+                info=$(bluetoothctl info "${mac}" 2>/dev/null) || info=""
+                value=""
+                if grep -q 'Connected: yes' <<<"${info}"; then
+                    # BlueZ bluetoothctl displays 'Battery Percentage: 0xNN (NN)'.
+                    value=$(sed -nE 's/.*Battery Percentage:.*\(([0-9]{1,3})\).*/\1/p' <<<"${info}" | head -n1)
+                fi
+                if [[ "${value}" =~ ^[0-9]+$ ]] && (( value <= 100 )); then
+                    mqtt_publish "${prefix}/state" "${value}" no
+                    mqtt_publish "${prefix}/availability" online no
+                else
+                    mqtt_publish "${prefix}/availability" offline no
+                fi
+                sleep "${RECONNECT_INTERVAL}"
+            done
+        }
+        for i in "${!SPEAKERS_MAC[@]}"; do
+            monitor_battery "${SPEAKERS_MAC[i]}" &
+        done
+        bashio::log.info "Optional MQTT battery monitoring enabled."
+    else
+        bashio::log.warning "battery_mqtt_enabled=true but battery_mqtt_host is empty; skipping."
+    fi
+fi
+
 for i in "${!SPEAKERS_MAC[@]}"; do
     monitor_speaker \
         "${SPEAKERS_MAC[i]}" \
