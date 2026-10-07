@@ -478,30 +478,57 @@ if [ "$(bashio::config 'battery_mqtt_enabled' 2>/dev/null || echo false)" = "tru
             if [ "${retain}" = yes ]; then args+=(-r); fi
             if [ -n "${MQTT_USER}" ] && [ "${MQTT_USER}" != null ]; then args+=(-u "${MQTT_USER}"); fi
             if [ -n "${MQTT_PASS}" ] && [ "${MQTT_PASS}" != null ]; then args+=(-P "${MQTT_PASS}"); fi
-            timeout 8 mosquitto_pub "${args[@]}" >/dev/null 2>&1 || true
+            # Do not log credentials or command arguments on failure.
+            timeout 8 mosquitto_pub "${args[@]}" >/dev/null 2>&1
+        }
+        battery_percent_from_info() {
+            local info="$1" raw
+            # Accept both BlueZ formats: "Battery Percentage: 0x64 (100)"
+            # and "Battery Percentage: 100"; reject anything else.
+            raw=$(sed -nE 's/.*Battery Percentage:[[:space:]]*(0[xX][0-9a-fA-F]+|[0-9]{1,3})([[:space:]]*\([0-9]{1,3}\))?.*/\1\2/p' <<<"${info}" | head -n1)
+            if [[ "${raw}" =~ \(([0-9]{1,3})\) ]]; then
+                printf '%s' "$((10#${BASH_REMATCH[1]}))"
+            elif [[ "${raw}" =~ ^0[xX]([0-9a-fA-F]+)$ ]]; then
+                printf '%s' "$((16#${BASH_REMATCH[1]}))"
+            elif [[ "${raw}" =~ ^[0-9]{1,3}$ ]]; then
+                printf '%s' "$((10#${raw}))"
+            fi
         }
         monitor_battery() {
-            local mac="$1" id="${1//:/}" info value prefix discovery
+            local mac="$1" id="${1//:/}" info value prefix discovery config
+            local failures=0
             id="${id,,}"
             prefix="bluetooth_audio_bridge/${id}"
             discovery="homeassistant/sensor/bluetooth_audio_bridge_${id}_battery/config"
-            # Discovery is retained, state and availability are not; expire_after
-            # prevents a stale value being treated as fresh after a crash.
-            local config
-            config=$(printf '{"name":"Battery","unique_id":"bluetooth_audio_bridge_%s_battery","state_topic":"%s/state","availability_topic":"%s/availability","device_class":"battery","state_class":"measurement","unit_of_measurement":"%%","expire_after":120,"device":{"identifiers":["bluetooth_audio_bridge_%s"],"name":"Bluetooth Speaker %s","manufacturer":"Bluetooth Audio Bridge"}}' "${id}" "${prefix}" "${prefix}" "${id}" "${mac}")
+            # Discovery is retained; state is not. Availability is retained
+            # so disconnects persist across HA restarts; expire_after bounds stale data.
+            config=$(printf '{"name":"Battery","unique_id":"bluetooth_audio_bridge_%s_battery","state_topic":"%s/state","availability_topic":"%s/availability","payload_available":"online","payload_not_available":"offline","device_class":"battery","state_class":"measurement","unit_of_measurement":"%%","expire_after":120,"device":{"identifiers":["bluetooth_audio_bridge_%s"],"name":"Bluetooth Speaker %s","manufacturer":"Bluetooth Audio Bridge"}}' "${id}" "${prefix}" "${prefix}" "${id}" "${mac}")
             while true; do
-                mqtt_publish "${discovery}" "${config}" yes
                 info=$(bluetoothctl info "${mac}" 2>/dev/null) || info=""
                 value=""
                 if grep -q 'Connected: yes' <<<"${info}"; then
-                    # BlueZ bluetoothctl displays 'Battery Percentage: 0xNN (NN)'.
-                    value=$(sed -nE 's/.*Battery Percentage:.*\(([0-9]{1,3})\).*/\1/p' <<<"${info}" | head -n1)
+                    value=$(battery_percent_from_info "${info}")
                 fi
+                # Publish state BEFORE online availability; never mark a
+                # device online if its fresh state could not be published.
+                local publish_ok=true
                 if [[ "${value}" =~ ^[0-9]+$ ]] && (( value <= 100 )); then
-                    mqtt_publish "${prefix}/state" "${value}" no
-                    mqtt_publish "${prefix}/availability" online no
+                    mqtt_publish "${prefix}/state" "${value}" no || publish_ok=false
+                    if [ "${publish_ok}" = true ]; then
+                        mqtt_publish "${prefix}/availability" online yes || publish_ok=false
+                    fi
                 else
-                    mqtt_publish "${prefix}/availability" offline no
+                    mqtt_publish "${prefix}/availability" offline yes || publish_ok=false
+                fi
+                mqtt_publish "${discovery}" "${config}" yes || publish_ok=false
+                if [ "${publish_ok}" = false ]; then
+                    failures=$((failures + 1))
+                    if (( failures == 1 || failures % 20 == 0 )); then
+                        bashio::log.warning "MQTT battery publishing failed for ${mac} (${failures} consecutive cycles)." || true
+                    fi
+                elif (( failures > 0 )); then
+                    bashio::log.info "MQTT battery publishing recovered for ${mac}." || true
+                    failures=0
                 fi
                 sleep "${RECONNECT_INTERVAL}"
             done
