@@ -79,7 +79,7 @@ description: "Connect any Bluetooth speaker to Home Assistant as a native media_
 # En anglais : c'est ce texte qui s'affiche dans le magasin d'add-ons HA,
 # dont l'audience est la communauté internationale, pas seulement toi.
 
-url: "https://github.com/dcybeldesign/ha-mpd-bluetooth-bridge"
+url: "https://github.com/sedarts/ha-mpd-bluetooth-bridge"
 # À adapter si le dépôt communautaire est finalement créé sous un autre
 # nom/compte — voir le dépôt réel une fois poussé.
 
